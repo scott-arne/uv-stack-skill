@@ -25,15 +25,15 @@ skills/
 
 ## Installation
 
-From a local checkout:
+From GitHub:
 
 ```
-/plugin marketplace add /path/to/uv-stack-skill
+/plugin marketplace add scott-arne/uv-stack-skill
 /plugin install uv-stack@uv-stack
 ```
 
-From a git remote, replace the path with the repository URL. Verify with
-`/plugin` — the skill loads as `uv-stack:using-uv-stack`.
+From a local checkout, replace the repository slug with the checkout path.
+Verify with `/plugin` — the skill loads as `uv-stack:using-uv-stack`.
 
 Prerequisites on the target machine: `uv`, `micromamba` (after
 `micromamba shell init`), and `uv tool install uv-stack`.

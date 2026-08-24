@@ -1,0 +1,11 @@
+[[locations]]
+file = ".claude-plugin/plugin.json"
+type = "custom"
+label = "plugin manifest"
+template = '"version": "{version}"'
+
+[[locations]]
+file = ".claude-plugin/marketplace.json"
+type = "custom"
+label = "marketplace manifest"
+template = '"version": "{version}"'
