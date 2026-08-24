@@ -18,8 +18,9 @@ managed environment or a generated file directly.**
 
 ## First: probe and orient
 
-1. **Probe:** `command -v stack`. If absent, use plain uv/micromamba and
-   offer `uv tool install uv-stack`.
+1. **Probe:** `command -v stack`. If absent, stop — the rest of this skill
+   does not apply; use plain uv/micromamba and offer
+   `uv tool install uv-stack`.
 2. **Config root:** `$UV_STACK_ROOT`, else legacy `$UV_ENV_ROOT`, else
    `~/.config/python-envs`.
 3. **Machine policy:** read `<config-root>/AGENTS.md` if it exists — it

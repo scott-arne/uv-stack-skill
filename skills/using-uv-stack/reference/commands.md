@@ -1,12 +1,13 @@
 # stack command reference
 
-Verified against uv-stack 0.4.4. `stack --help` and `<subcommand> --help` are
-authoritative when versions differ.
+Verified against uv-stack 0.4.4 (`stack --version` reports the installed
+version). `stack --help` and `<subcommand> --help` are authoritative when
+versions differ.
 
 ## Contents
 
 - Global (config-root resolution)
-- Commands (full table with key options)
+- Commands (grouped as in `stack --help`, with key options)
 - Stack tokens (bare names, `profile:`, `@`/`bundle:`, `pkg:`, literals)
 - Config root layout (directory tree, source vs generated files)
 - Shared environments (upgrade semantics, conda-layer caveat, dry-run)
@@ -25,20 +26,44 @@ Config root resolution: `--root` > `$UV_STACK_ROOT` > `$UV_ENV_ROOT` (legacy)
 
 ## Commands
 
+Grouped as in `stack --help`.
+
+### Create
+
 | Command | Purpose | Key options |
 | --- | --- | --- |
-| `stack init` | Guided first-run setup (config tree, starter profile, first env) | `--yes` accepts defaults |
 | `stack create env NAME [TOKENS]...` | Scaffold (with TOKENS) and build a shared environment | `--python VER` (writes `python.txt`, requires TOKENS), `--recreate` (wipe first), `--strict` |
 | `stack create project TOKENS...` | Create a uv project in the current directory from resolved tokens | `--python SPEC-or-env-name`, `--name`, `--no-sync`, `--force` (add to existing pyproject), `--no-track`, `--strict` |
 | `stack create profile NAME PKG...` | Write `profiles/NAME.yaml` | `--description`, `--tag` (repeatable) |
 | `stack create bundle NAME TOKEN...` | Write `bundles/NAME.yaml` | `--description`, `--tag`, `--strict` |
+
+### Environments
+
+| Command | Purpose | Key options |
+| --- | --- | --- |
 | `stack upgrade [NAMES]...` | Render, compile, sync, check shared envs. No NAMES = all (prompts; `-y` skips) | `--all`, `--dry-run`, `--no-upgrade`, `--upgrade-package PKG` (repeatable), `--stop-on-error`, `--strict` |
+
+### Projects
+
+| Command | Purpose | Key options |
+| --- | --- | --- |
 | `stack refresh` | Re-resolve the tracked project in the current directory | `--dry-run` (shows add/remove delta), `--python` (override + record), `--no-sync`, `--strict` |
+
+### Inspection
+
+| Command | Purpose | Key options |
+| --- | --- | --- |
 | `stack status [NAMES]...` | Per-env build state: exists, lock present, sources changed | `--json` |
 | `stack list env\|profile\|bundle` | Tables of what exists | `--tag`, `--json` |
 | `stack show env\|profile\|bundle [NAME]` | One item's details (env NAME defaults to `main`) | `--json` |
 | `stack show project` | Tracked project here: tokens, applied packages, pending state | `--json` |
 | `stack resolve TOKENS...` | Classify tokens; `--full` expands to a flat package list | `--full`, `--strict`, `--json` |
+
+### Maintenance
+
+| Command | Purpose | Key options |
+| --- | --- | --- |
+| `stack init` | Guided first-run setup (config tree, starter profile, first env) | `--yes` accepts defaults |
 | `stack doctor` | Detect problems, print `fix:` suggestions; never changes anything without `--fix` | `--fix` (safe repairs only), `--json` |
 | `stack completion bash\|zsh\|fish` | Shell completion script | |
 | `stack config init` | Create missing config directories (bare primitive; `stack init` is the guided form) | |
@@ -145,3 +170,5 @@ with `stack create env NAME --recreate`.
 | `UV_ENV_ROOT` | Legacy spelling; used only when `UV_STACK_ROOT` unset/empty |
 | `UV_STACK_PROJECT_PYTHON` | Default interpreter spec for `create project` |
 | `MAMBA_EXE` | micromamba binary path; set by `micromamba shell init`, preferred over PATH |
+
+For workflow guidance and hard rules, see [../SKILL.md](../SKILL.md).
