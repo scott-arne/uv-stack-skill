@@ -7,55 +7,47 @@ description: Manage Python environments and project dependencies declaratively w
 
 ## Overview
 
-uv-stack's `stack` CLI manages Python environments declaratively: micromamba
-owns the interpreter and conda-level binaries; uv owns pip packages, compiled
-to a pinned lock. You *define* packages once — profiles (package lists) and
-bundles (groups of profiles) — and *install* those definitions into shared
-environments or uv projects.
+The `stack` CLI manages Python environments declaratively: micromamba owns
+the interpreter and conda-level binaries; uv owns pip packages, compiled to
+a pinned lock. Define packages once in profiles (package lists) and bundles
+(groups of profiles); install those definitions into shared environments or
+uv projects.
 
-**Core principle: change source files, then re-render. Never mutate a managed
-environment or a generated file directly.**
+**Core principle: change source files, then re-render. Never mutate a
+managed environment or a generated file directly.**
 
 ## First: probe and orient
 
-Work through these steps in order before acting:
-
-1. **Probe:** `command -v stack`. If absent, fall back to plain
-   uv/micromamba and offer `uv tool install uv-stack`.
-2. **Resolve the config root:** `$UV_STACK_ROOT`, else legacy
-   `$UV_ENV_ROOT`, else `~/.config/python-envs`.
-3. **Read machine-local policy:** if `<config-root>/AGENTS.md` exists, read
-   it before acting. It holds this machine's policies (default env, naming,
-   restrictions) and overrides this skill's generic guidance.
-4. **Discover state with the CLI**, not filesystem forensics — each accepts
-   `--json`:
+1. **Probe:** `command -v stack`. If absent, use plain uv/micromamba and
+   offer `uv tool install uv-stack`.
+2. **Config root:** `$UV_STACK_ROOT`, else legacy `$UV_ENV_ROOT`, else
+   `~/.config/python-envs`.
+3. **Machine policy:** read `<config-root>/AGENTS.md` if it exists — it
+   overrides this skill's generic guidance.
+4. **Discover with the CLI** (each takes `--json`), not filesystem
+   forensics:
 
 ```bash
 stack list env            # also: profile, bundle
 stack show env NAME       # tokens, python, resolved packages
 stack status              # per-env: exists? lock present? sources changed?
-stack doctor              # layout/config problems + suggested fixes
+stack doctor              # config problems + suggested fixes
 stack show project        # tracked project in CURRENT directory
 ```
 
-`stack status` compares sources against rendered files and lock freshness; it
-does **not** diff installed packages against the lock (sync consistency is
-verified by `uv pip check` at build time). Don't re-derive this from source.
+## Staleness: a two-step check
 
-**Full staleness check** — answering "is anything out of sync?" takes both
-steps; `stack status` alone is incomplete:
+`stack status` compares sources to rendered files and lock freshness only —
+never installed packages (build-time `uv pip check` covers pip sync).
+Answering "is anything out of sync?" takes both steps:
 
-1. `stack status` — source/lock drift per env; `stack doctor` — layout
-   problems.
+1. `stack status` for source/lock drift; `stack doctor` for layout.
 2. Conda layer (status's blind spot): `micromamba.txt`, `channels.txt`, and
-   `python.txt` apply to the live environment only at (re)creation, and
-   `stack upgrade` re-syncs the pip layer only. For each env, if any of those
-   files changed after the env was built (creation date:
-   `conda-meta/history` in the env), compare `micromamba list -n NAME`
-   against the env's `environment.yml`. Only conda-channel rows count in
-   that output — a `pypi` row never satisfies an `environment.yml` entry.
-   Drift exists only when the comparison shows missing or mismatched conda
-   packages — a newer mtime alone is not drift. Reconcile drift with
+   `python.txt` apply only at env (re)creation — `stack upgrade` re-syncs
+   the pip layer only. If any changed after the env was built (creation
+   date: `conda-meta/history`), compare `micromamba list -n NAME` with
+   `environment.yml`; only conda-channel rows count (`pypi` rows never
+   satisfy it), and a newer mtime alone is not drift. Fix drift with
    `stack create env NAME --recreate`.
 
 ## Task → action
@@ -63,44 +55,43 @@ steps; `stack status` alone is incomplete:
 | Task | Action |
 | --- | --- |
 | Add/remove package in shared env | Edit a profile it uses (machine-local: `envs/NAME/requirements.local.in`), then `stack upgrade NAME --no-upgrade` |
-| Update shared env to newest versions | `stack upgrade NAME` (floats all pins; `--upgrade-package PKG` for one) |
+| Float pins to newest versions | `stack upgrade NAME` (`--upgrade-package PKG` for just one) |
 | New shared env | `stack create env NAME TOKENS... --python 3.12` |
-| New project with standard packages | `cd <dir>` then `stack create project TOKENS...` — don't hand-roll `uv init` + `uv add` |
-| Propagate profile changes to a tracked project | `stack refresh` (from project root; `--dry-run` first shows the delta) |
-| Which envs exist / stale? | Both steps of the full staleness check above |
+| New project | `cd <dir>`, then `stack create project TOKENS...` — never hand-roll `uv init` + `uv add` |
+| Push profile changes to a tracked project | `stack refresh` from the project root (`--dry-run` shows the delta) |
+| Which envs exist / stale? | The two-step staleness check above |
 | What does token X mean? | `stack resolve TOKENS...` (`--full` expands to packages) |
 
-Preview any mutation with `--dry-run`. Tokens: bare name resolves
+Preview any mutation with `--dry-run`. Tokens: a bare name resolves
 profile → bundle → literal package; force with `profile:`, `@`/`bundle:`,
 `pkg:`; `--strict` errors on unqualified fallthrough.
 
 ## Hard rules
 
-- **Never edit generated files** — `requirements.in`, `environment.yml`,
-  `requirements.lock.txt` (header: "Generated by uv-stack — do not edit").
-  Edit `stack.txt`, `requirements.local.in`, `profiles/*.yaml`,
-  `bundles/*.yaml` instead.
-- **Never install directly into a managed environment** (`pip install`,
-  `uv pip install`, `micromamba install`): the next `stack upgrade` syncs
-  exactly to the lock and removes untracked additions.
-- **Managed = has `envs/<name>/stack.txt` under the config root.** Other
-  micromamba envs are unmanaged — leave them to their owners.
-- **Projects have no registry and no parent-directory search.** Run
-  `stack refresh` / `stack show project` from the directory holding
-  `pyproject.toml`. A project without `[tool.uv-stack]` is a plain uv
-  project — use normal `uv` commands unless the user wants stack tracking.
-- **Project interpreter default** is `$UV_STACK_PROJECT_PYTHON`, then
-  `<config-root>/project-python.txt`, then 3.12 — don't invent a version.
-  `--python <micromamba-env-name>` builds on that env's interpreter.
+- **Never edit generated files** (`requirements.in`, `environment.yml`,
+  `requirements.lock.txt`). Edit `stack.txt`, `requirements.local.in`,
+  `profiles/*.yaml`, `bundles/*.yaml` instead.
+- **Never install directly into a managed env** (`pip install`,
+  `uv pip install`, `micromamba install`): the next upgrade syncs exactly
+  to the lock and removes untracked additions.
+- **Managed = has `envs/<name>/stack.txt` under the config root.** Leave
+  other micromamba envs to their owners.
+- **No project registry, no parent-directory search:** run `stack refresh`
+  / `stack show project` from the `pyproject.toml` directory. No
+  `[tool.uv-stack]` table means a plain uv project — use normal `uv`
+  commands.
+- **Project interpreter default:** `$UV_STACK_PROJECT_PYTHON`, then
+  `<config-root>/project-python.txt`, then 3.12 — don't invent one.
+  `--python <env-name>` builds on that micromamba env's interpreter.
 
 ## Common mistakes
 
 | Mistake | Reality |
 | --- | --- |
-| Hand-editing `requirements.in` / running `uv pip compile` yourself | That's the pre-uv-stack flow. `stack upgrade` renders, compiles, syncs, checks. |
-| `uv init` + `uv add` for a fresh project | Skips profiles, tracking, and the configured interpreter default. Use `stack create project`. |
-| Re-pinning a stack-applied package with `uv add 'pkg<2'` | stack still owns that name; a later `stack refresh` may rewrite it. Pin in the profile instead. |
-| Diffing lock vs `pip freeze` to answer "is it stale?" | `stack status` answers source-drift; builds end with `uv pip check`. Deep-diff only when debugging a suspected sync failure. |
-| Treating `pending` in `[tool.uv-stack]` as corruption | It marks an interrupted run; the next successful `stack refresh` (or tracked create with `--force`) cleans it up. |
+| Hand-editing `requirements.in` / running `uv pip compile` yourself | Pre-uv-stack flow; `stack upgrade` renders, compiles, syncs, checks. |
+| `uv init` + `uv add` for a new project | Skips profiles, tracking, and the configured interpreter. Use `stack create project`. |
+| Re-pinning a stack-applied package via `uv add` | stack still owns the name; a later refresh may rewrite it. Pin in the profile. |
+| Diffing lock vs `pip freeze` for staleness | Use the two-step check; deep-diff only for a suspected sync failure. |
+| Treating `pending` in `[tool.uv-stack]` as corruption | Interrupted-run marker; the next `stack refresh` (or tracked create with `--force`) cleans it up. |
 
 Full command/flag/file/env-var detail: [reference/commands.md](reference/commands.md).
