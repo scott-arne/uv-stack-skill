@@ -3,6 +3,17 @@
 Verified against uv-stack 0.4.4. `stack --help` and `<subcommand> --help` are
 authoritative when versions differ.
 
+## Contents
+
+- Global (config-root resolution)
+- Commands (full table with key options)
+- Stack tokens (bare names, `profile:`, `@`/`bundle:`, `pkg:`, literals)
+- Config root layout (directory tree, source vs generated files)
+- Shared environments (upgrade semantics, conda-layer caveat, dry-run)
+- Projects (tracking, interpreter resolution, refresh ownership, pending state)
+- What `stack status` covers (and its blind spots)
+- Environment variables
+
 ## Global
 
 ```
