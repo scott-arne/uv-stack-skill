@@ -2,7 +2,7 @@
 
 A Claude Code plugin carrying one skill, `using-uv-stack`, which teaches
 coding agents to manage Python environments and project dependencies through
-the [uv-stack](https://github.com/scottarnejohnson/uv-stack) `stack` CLI
+the [uv-stack](https://github.com/scott-arne/uv-stack) `stack` CLI
 instead of ad-hoc `micromamba` / `uv pip compile` workflows.
 
 The skill triggers on any Python environment or dependency work: adding or
