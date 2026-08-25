@@ -1,6 +1,6 @@
 # stack command reference
 
-Verified against uv-stack 0.4.4 (`stack --version` reports the installed
+Verified against uv-stack 0.4.5 (`stack --version` reports the installed
 version). `stack --help` and `<subcommand> --help` are authoritative when
 versions differ.
 
@@ -10,7 +10,7 @@ versions differ.
 - Commands (grouped as in `stack --help`, with key options)
 - Stack tokens (bare names, `profile:`, `@`/`bundle:`, `pkg:`, literals)
 - Config root layout (directory tree, source vs generated files)
-- Shared environments (upgrade semantics, conda-layer caveat, dry-run)
+- Shared environments (upgrade semantics, changing Python, conda-layer caveat, dry-run)
 - Projects (tracking, interpreter resolution, refresh ownership, pending state)
 - What `stack status` covers (and its blind spots)
 - Environment variables
@@ -32,7 +32,7 @@ Grouped as in `stack --help`.
 
 | Command | Purpose | Key options |
 | --- | --- | --- |
-| `stack create env NAME [TOKENS]...` | Scaffold (with TOKENS) and build a shared environment | `--python VER` (writes `python.txt`, requires TOKENS), `--recreate` (wipe first), `--strict` |
+| `stack create env NAME [TOKENS]...` | Scaffold (with TOKENS) and build a shared environment; without TOKENS, retarget an existing env's interpreter | `--python VER` (writes `python.txt`; without TOKENS it requires `--recreate`), `--recreate` (compile the lock first, then wipe and rebuild), `--strict` |
 | `stack create project TOKENS...` | Create a uv project in the current directory from resolved tokens | `--python SPEC-or-env-name`, `--name`, `--no-sync`, `--force` (add to existing pyproject), `--no-track`, `--strict` |
 | `stack create profile NAME PKG...` | Write `profiles/NAME.yaml` | `--description`, `--tag` (repeatable) |
 | `stack create bundle NAME TOKEN...` | Write `bundles/NAME.yaml` | `--description`, `--tag`, `--strict` |
@@ -53,7 +53,7 @@ Grouped as in `stack --help`.
 
 | Command | Purpose | Key options |
 | --- | --- | --- |
-| `stack status [NAMES]...` | Per-env build state: exists, lock present, sources changed | `--json` |
+| `stack status [NAMES]...` | Per-env build state: exists, lock present, sources changed, Python changed | `--json` |
 | `stack list env\|profile\|bundle` | Tables of what exists | `--tag`, `--json` |
 | `stack show env\|profile\|bundle [NAME]` | One item's details (env NAME defaults to `main`) | `--json` |
 | `stack show project` | Tracked project here: tokens, applied packages, pending state | `--json` |
@@ -92,7 +92,7 @@ unqualified fallthrough into an error.
 ├── .locks/                   # internal lock files — leave alone
 └── envs/<name>/
     ├── stack.txt             # REQUIRED; one token per line; # comments
-    ├── python.txt            # optional interpreter version (default 3.12)
+    ├── python.txt            # optional interpreter version (default 3.12); applied at create/--recreate only
     ├── micromamba.txt        # optional extra conda packages
     ├── channels.txt          # optional extra conda channels (conda-forge always first)
     ├── requirements.local.in # optional machine-local pip additions
@@ -113,13 +113,30 @@ unqualified fallthrough into an error.
   micromamba only if the env is missing — the live conda layer is applied at
   creation or `--recreate` only. After editing them, rebuild with
   `stack create env NAME --recreate`.
+- Changing an env's interpreter: `stack create env NAME --python 3.14
+  --recreate`. `--recreate` requires `python.txt` to hold a plain dotted
+  version (a match spec such as `3.12.*` is refused, because the lock is
+  resolved against that value with `uv pip compile --python-version`); a
+  match spec is still legal when creating with TOKENS and no `--recreate`.
+  The candidate lock is compiled *before* `micromamba remove` runs, so an
+  unsatisfiable resolve leaves the old environment intact, and the lock is
+  published only after the rebuild succeeds.
+- A non-recreate `stack upgrade` refuses outright when the env's running
+  interpreter no longer satisfies `python.txt`, rather than syncing the pip
+  layer onto the wrong interpreter. The error names both remedies: edit
+  `python.txt` back to the running version, or recreate. The probe fails
+  open — an unavailable micromamba or an unparseable version never
+  manufactures a refusal.
 - Batch upgrades continue past failures and end with a pass/fail summary;
   `--stop-on-error` aborts at the first failure.
 - The lock is compiled to a temp file and atomically swapped, so a failed
   compile never corrupts the existing lock. If the sync step fails (e.g.
   network), rerun `stack upgrade NAME`.
-- `--dry-run` runs no commands and never touches lock or env, but it DOES
-  re-render `requirements.in` and `environment.yml`.
+- `--dry-run` runs no mutating commands and never touches lock or env, but it
+  DOES re-render `requirements.in` and `environment.yml`, and it DOES issue
+  one read-only interpreter probe — a dry run is held to the same
+  version-drift refusal as the real thing, so the plan it prints never
+  describes commands the real run would decline to issue.
 
 ## Projects
 
@@ -151,12 +168,28 @@ unqualified fallthrough into an error.
 
 Per environment: does the micromamba env exist, is a lock present, did
 sources change since the last build ("sources changed" means run
-`stack upgrade`). It re-renders specs from config and checks lock freshness;
-it does NOT compare installed packages against the lock. Installed-state
-consistency is enforced at build time by `uv pip sync` + `uv pip check`.
+`stack upgrade`), and does the running interpreter still match `python.txt`.
+It re-renders specs from config and checks lock freshness; it does NOT
+compare installed packages against the lock. Installed-state consistency is
+enforced at build time by `uv pip sync` + `uv pip check`.
 
-It also cannot detect a live conda layer that predates edits to
-`micromamba.txt`/`channels.txt`/`python.txt`: any later upgrade re-renders
+States, in the precedence order they are decided: `config error`,
+`not created`, `never built`, `python changed`, `sources changed`,
+`lock stale`, `ok` — so a drifted interpreter masks a `sources changed` row
+until it is resolved.
+
+The probe (`micromamba run -n NAME python -c ...`) reports both versions:
+the table shows `3.12 (env 3.14)` in the Python column for a drifted env,
+and `--json` carries `actual_python` beside `python` (null when the probe
+could not run). It fails open — an unavailable micromamba, a failed
+`python -c`, or an unparseable version leaves the state alone rather than
+reporting false drift, as does a `python.txt` that is not a plain dotted
+version (nothing meaningful to compare). A configured `3.14` is satisfied by
+an actual `3.14.7`: the comparison is component-wise, only as far as
+`python.txt` specifies.
+
+It still cannot detect a live conda *package* layer that predates edits to
+`micromamba.txt`/`channels.txt`: any later upgrade re-renders
 `environment.yml`, so status returns to "ok" while the installed conda layer
 still lacks the change. When those files changed after the env was built,
 compare `micromamba list -n NAME` against the env's `environment.yml`; fix
