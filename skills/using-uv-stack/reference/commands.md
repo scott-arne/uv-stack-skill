@@ -1,17 +1,20 @@
 # stack command reference
 
-Verified against uv-stack 0.4.5 (`stack --version` reports the installed
+Verified against uv-stack 0.6.0 (`stack --version` reports the installed
 version). `stack --help` and `<subcommand> --help` are authoritative when
 versions differ.
 
 ## Contents
 
-- Global (config-root resolution)
+- Global (config-root resolution, NAME rules)
 - Commands (grouped as in `stack --help`, with key options)
-- Stack tokens (bare names, `profile:`, `@`/`bundle:`, `pkg:`, literals)
+- Stack tokens (bare names, `profile:`, `@`/`bundle:`, `pkg:`, literals, `${NAME}`)
 - Config root layout (directory tree, source vs generated files)
-- Shared environments (upgrade semantics, changing Python, conda-layer caveat, dry-run)
-- Projects (tracking, interpreter resolution, refresh ownership, pending state)
+- Shared environments (upgrade and sync semantics, changing Python, conda-layer caveat, dry-run)
+- Projects (tracking, interpreter resolution, refresh and sync project, pending state)
+- Editing config files (`stack edit`, editor precedence)
+- Comparing environments (`stack diff` sources, layers, verdicts)
+- Portable config roots (what travels, bring-up, `.gitignore`, variables)
 - What `stack status` covers (and its blind spots)
 - Environment variables
 
@@ -23,6 +26,12 @@ stack [--root PATH] COMMAND ...
 
 Config root resolution: `--root` > `$UV_STACK_ROOT` > `$UV_ENV_ROOT` (legacy)
 > `~/.config/python-envs`.
+
+A NAME given to `create`, `edit`, `show`, `status`, `upgrade`, or `sync env`
+is a file stem: one holding a path separator, a `.` or `..` segment, `:`, `@`,
+whitespace, or a leading `-` is refused. A hand-made directory with such a
+name still shows in `stack list env` and a bare `stack status`; rename it on
+disk to address it by name.
 
 ## Commands
 
@@ -37,17 +46,31 @@ Grouped as in `stack --help`.
 | `stack create profile NAME PKG...` | Write `profiles/NAME.yaml` | `--description`, `--tag` (repeatable) |
 | `stack create bundle NAME TOKEN...` | Write `bundles/NAME.yaml` | `--description`, `--tag`, `--strict` |
 
+### Edit
+
+| Command | Purpose | Key options |
+| --- | --- | --- |
+| `stack edit env\|profile\|bundle\|project [NAME]` | Open a config file in an editor, validate it when the editor exits, re-offer on error. `env` NAME defaults to `main`; `project` takes no NAME and edits `./pyproject.toml`. Never creates anything | `--file stack\|python\|micromamba\|channels\|local` (env only; default `stack`; a missing optional file is opened anyway), `--editor CMD` |
+
 ### Environments
 
 | Command | Purpose | Key options |
 | --- | --- | --- |
-| `stack upgrade [NAMES]...` | Render, compile, sync, check shared envs. No NAMES = all (prompts; `-y` skips) | `--all`, `--dry-run`, `--no-upgrade`, `--upgrade-package PKG` (repeatable), `--stop-on-error`, `--strict` |
+| `stack upgrade [NAMES]...` | Render, compile, sync, check existing shared envs. No NAMES = all (prompts; `-y` skips). Never creates a missing env | `--all`, `--dry-run`, `--no-upgrade`, `--upgrade-package PKG` (repeatable), `--stop-on-error`, `--strict` |
 
 ### Projects
 
 | Command | Purpose | Key options |
 | --- | --- | --- |
 | `stack refresh` | Re-resolve the tracked project in the current directory | `--dry-run` (shows add/remove delta), `--python` (override + record), `--no-sync`, `--strict` |
+
+### Sync
+
+| Command | Purpose | Key options |
+| --- | --- | --- |
+| `stack sync` | Create, build, and recompile every env the root declares. Creates missing envs, never prompts, preserves existing pins | `--dry-run`, `--stop-on-error`, `--strict`, `--upgrade` (force new pins) |
+| `stack sync env NAMES...` | The same, for the named envs only | same as `stack sync` |
+| `stack sync project TOKENS...` | Append TOKENS to the tracked project's recorded stack and re-resolve (a token already recorded makes it a plain refresh) | `--dry-run`, `--python`, `--no-sync`, `--strict` |
 
 ### Inspection
 
@@ -58,15 +81,17 @@ Grouped as in `stack --help`.
 | `stack show env\|profile\|bundle [NAME]` | One item's details (env NAME defaults to `main`) | `--json` |
 | `stack show project` | Tracked project here: tokens, applied packages, pending state | `--json` |
 | `stack resolve TOKENS...` | Classify tokens; `--full` expands to a flat package list | `--full`, `--strict`, `--json` |
+| `stack diff SOURCE SOURCE` | Compare two environments' declared config and resolved pins (see Comparing environments) | `--json`, `--exit-code` |
 
 ### Maintenance
 
 | Command | Purpose | Key options |
 | --- | --- | --- |
 | `stack init` | Guided first-run setup (config tree, starter profile, first env) | `--yes` accepts defaults |
-| `stack doctor` | Detect problems, print `fix:` suggestions; never changes anything without `--fix` | `--fix` (safe repairs only), `--json` |
+| `stack doctor` | Detect problems, print `fix:` suggestions; never changes anything without `--fix`. Also checks portability: declared variables with no value, bad `${...}` references, missing editable checkouts, a `project-python.txt` that will not travel, a missing or stale managed `.gitignore` block, a name that is both a profile and a bundle | `--fix` (safe repairs only), `--json` |
 | `stack completion bash\|zsh\|fish` | Shell completion script | |
 | `stack config init` | Create missing config directories (bare primitive; `stack init` is the guided form) | |
+| `stack config portable` | Write the managed `.gitignore` block and `.gitkeep` placeholders in empty top-level dirs; print the git commands to run next. Never runs git | `--dry-run` (show block and next steps; write nothing) |
 
 ## Stack tokens
 
@@ -79,14 +104,23 @@ Grouped as in `stack --help`.
 | `numpy>=2`, `-e ~/src/mytool`, archive paths | Literal pip requirement, passed through |
 
 Near-miss bare tokens trigger a "did you mean" warning; `--strict` (on
-`upgrade`, `create env/project/bundle`, `resolve`, `refresh`) turns any
-unqualified fallthrough into an error.
+`upgrade`, `sync`, `create env/project/bundle`, `resolve`, `refresh`) turns
+any unqualified fallthrough into an error.
+
+Entries in profiles, bundles, and `stack.txt` may reference `${NAME}` for a
+variable the root declares (see Portable config roots). An entry spanning
+more than one line or ending in a trailing backslash is refused by every
+command that renders.
 
 ## Config root layout
 
 ```
 <config-root>/
+├── variables.txt             # optional: declares the ${NAME}s entries may reference
+├── variables.local.txt       # optional: this machine's NAME=value lines; not committed
+├── .gitignore                # managed block written by `stack config portable`
 ├── project-python.txt        # optional: default --python for `create project`
+├── editor.txt                # optional: editor command for `stack edit`; not committed
 ├── profiles/<name>.yaml      # description, tags, includes: [pip requirements]
 ├── bundles/<name>.yaml       # includes: [stack tokens]; bundles can nest
 ├── .locks/                   # internal lock files — leave alone
@@ -106,8 +140,14 @@ unqualified fallthrough into an error.
 - Enter: `micromamba activate NAME`; one-off: `micromamba run -n NAME CMD`.
 - `stack upgrade NAME` default recompiles with `--upgrade` (all pins float),
   then syncs the env exactly to the lock — packages removed from sources are
-  uninstalled. `--no-upgrade` re-locks without floating pins (smallest safe
-  change when adding); `--upgrade-package PKG` floats one.
+  uninstalled. `--no-upgrade` re-locks keeping the pins the existing lock
+  holds (smallest safe change when adding); `--upgrade-package PKG` floats
+  only PKG. Before 0.6.0 both flags silently re-resolved everything, so the
+  first run under 0.6.0 may move pins that should already have stayed put.
+- `stack sync` / `stack sync env NAMES...` do the same render-compile-sync
+  but create missing envs instead of failing on them, never prompt, and
+  preserve existing pins by default (`--upgrade` floats them). Upgrade is
+  for envs that exist; sync is for "make this root real on this machine".
 - Conda-layer sources (`micromamba.txt`, `channels.txt`, `python.txt`) render
   into `environment.yml`, but a plain `stack upgrade` of an existing env runs
   micromamba only if the env is missing — the live conda layer is applied at
@@ -127,8 +167,10 @@ unqualified fallthrough into an error.
   `python.txt` back to the running version, or recreate. The probe fails
   open — an unavailable micromamba or an unparseable version never
   manufactures a refusal.
-- Batch upgrades continue past failures and end with a pass/fail summary;
-  `--stop-on-error` aborts at the first failure.
+- Upgrade and sync batches continue past failures and end with a summary of
+  succeeded, failed, and skipped envs (skipped appears only under
+  `--stop-on-error`, which aborts at the first failure). A `--dry-run` batch
+  prints the summary too.
 - The lock is compiled to a temp file and atomically swapped, so a failed
   compile never corrupts the existing lock. If the sync step fails (e.g.
   network), rerun `stack upgrade NAME`.
@@ -155,6 +197,15 @@ unqualified fallthrough into an error.
   table are not preserved); every other byte of `pyproject.toml` is left
   alone — though refresh runs `uv remove`/`uv add` under the hood, which edit
   `[project.dependencies]` normally.
+- `stack sync project TOKENS...` appends TOKENS to the recorded stack
+  (`["standard"]` + `@qsar` becomes `["standard", "@qsar"]`) and re-resolves
+  through the same recovery as refresh. Use it to add tokens; use
+  `stack refresh` to re-resolve the recorded ones. Neither removes a token —
+  to drop one, edit `stack` in `[tool.uv-stack]` (or `stack edit project`),
+  then `stack refresh`.
+- `stack create project` and `stack refresh` warn when the interpreter spec
+  they record will not resolve on another machine (an absolute path, or a
+  micromamba env only this machine has).
 - Interrupted run: a `pending` key remains in the table; `stack show project`
   reports it. The next successful `stack refresh` (or re-running the tracked
   create with `--force`) cleans it up. Recovery adopts leftover pending names
@@ -163,6 +214,87 @@ unqualified fallthrough into an error.
   auto-resume.
 - Day to day a tracked project is still a normal uv project: `uv add`,
   `uv sync`, `uv run` all work.
+
+## Editing config files
+
+- `stack edit` is interactive: it blocks on the editor, validates the file
+  when the editor exits, and on error shows it and offers the editor again
+  with the changes in place. Nothing is reverted; declining leaves the file
+  as edited and exits non-zero. With stdin not a terminal there is no
+  re-offer (error, exit 1); an editor exiting non-zero (`:cq`) aborts
+  without validating.
+- On success it names how to apply: `stack upgrade NAME` for an env,
+  `stack refresh` for a project, next upgrade/refresh for a profile or bundle.
+- Editor: `--editor` > `$UV_STACK_EDITOR` > `<config-root>/editor.txt` >
+  `$VISUAL` > `$EDITOR`; empty values are skipped; none set = refuses. The
+  value is a command line (`code -w`, `emacsclient -nw`).
+- A GUI editor that returns immediately (`code`/`subl` without `-w`, `gvim`
+  without `-f`) makes validation run before any edit and report success.
+  Always use the blocking flag.
+- `editor.txt` strips everything from `#`, so an editor command containing
+  `#` must come from an environment variable.
+- Symlinked config files work (the success line names the real target); a
+  dangling link is refused.
+
+## Comparing environments
+
+`stack diff SOURCE SOURCE`. A source is an env in this root, the path to
+another machine's `envs/<name>/` directory wherever it sits (it is read in
+place, never copied into this root), or a path to a
+`requirements.lock.txt`.
+
+- Four layers: interpreter (`python.txt`), micromamba packages, effective
+  channel order, compiled pins. A bare lock carries pins only; the other
+  three are reported as not compared, never as matching.
+- The first three are compared as *declared*: two envs that both say `3.12`
+  can run different patch releases. Only the pins are *resolved*. `diff`
+  reads what was compiled, never what is installed.
+- Verdict: `identical`, `identical-where-comparable` (pins matched, a bare
+  lock hid the rest), or `different`. Exit 0 for all three; `--exit-code`
+  exits 1 on `different`. An unreadable source exits 1 either way.
+- Compiled locks do not travel with a cloned root, so comparing against
+  another machine means copying its `envs/<name>/` directory (lock included)
+  here first.
+
+## Portable config roots
+
+A config root can live in git and be cloned elsewhere.
+
+| Travels | Stays machine-local |
+| --- | --- |
+| `profiles/`, `bundles/`, `envs/*/stack.txt`, `python.txt`, `micromamba.txt`, `channels.txt` | `requirements.in`, `environment.yml`, `requirements.lock.txt` (generated) |
+| `variables.txt` (declared names) | `variables.local.txt` (this machine's values) |
+| `project-python.txt` when it holds a version, a uv form (`cpython@3.12`), or an env this root declares | `envs/*/requirements.local.in`, `editor.txt`, `.locks/` |
+
+- **Locks deliberately do not travel**: each machine compiles for its own
+  platform, so machines built from the same sources get compatible envs,
+  not identical pins. `stack diff` shows the difference.
+- **Bring-up on a new machine:** clone, `stack doctor` (names declared
+  variables with no value here), fill `variables.local.txt`, `stack sync`.
+- **Making a root committable:** `stack config portable` writes a block
+  between `# BEGIN uv-stack` / `# END uv-stack` markers in `<root>/.gitignore`
+  (lines outside it are preserved; inside is replaced on each run), adds
+  `.gitkeep` to empty `profiles/`, `bundles/`, `envs/`, and prints the git
+  commands to run — including `git rm --cached` for already-tracked files
+  that are now ignored. It never runs git. It refuses a `.gitignore` that is
+  a symlink or has a second hard link. A root inside a larger repo (dotfiles)
+  works: the printed commands use `git -C <root>`. Its printed `commit`
+  records everything already staged in that repo, so check `git status`
+  first.
+- **Variables:** `variables.txt` lists names, one per line (`#` comments).
+  `variables.local.txt` holds `NAME=value` lines. An exported environment
+  variable of a declared name wins over the file (how CI supplies values);
+  undeclared names are never read from the environment. Reference as
+  `${NAME}` in profiles, bundles, `stack.txt`; expanded into
+  `requirements.in` and `uv add`, but a tracked project's `[tool.uv-stack]`
+  keeps the unexpanded entry.
+- Variable values: no whitespace (a path with a space needs a symlink); a
+  value containing `${` is refused, not expanded (substitution is
+  single-pass). `stack doctor` reports both. A `#` in the file form is
+  silently stripped as a comment; export the variable instead.
+- The limit: `uv add` writes a local source's (editable or path) resolved
+  absolute path into the project's own `[tool.uv.sources]`, so a tracked
+  project that pulls in a local source is machine-bound in that table.
 
 ## What `stack status` covers
 
@@ -202,6 +334,9 @@ with `stack create env NAME --recreate`.
 | `UV_STACK_ROOT` | Config root (overridden by `--root`) |
 | `UV_ENV_ROOT` | Legacy spelling; used only when `UV_STACK_ROOT` unset/empty |
 | `UV_STACK_PROJECT_PYTHON` | Default interpreter spec for `create project` |
+| `UV_STACK_EDITOR` | Editor for `stack edit`; beats `editor.txt`, `$VISUAL`, `$EDITOR` |
+| `VISUAL`, `EDITOR` | Fallback editors for `stack edit`, in that order, below `editor.txt` |
+| any name in `variables.txt` | This machine's value for `${NAME}`; beats `variables.local.txt` |
 | `MAMBA_EXE` | micromamba binary path; set by `micromamba shell init`, preferred over PATH |
 
 For workflow guidance and hard rules, see [../SKILL.md](../SKILL.md).

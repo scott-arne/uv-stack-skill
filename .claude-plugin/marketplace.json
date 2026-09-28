@@ -9,7 +9,7 @@
     {
       "name": "uv-stack",
       "description": "Skill for managing Python environments and project dependencies with the uv-stack `stack` CLI.",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "author": {
         "name": "Scott Arne Johnson",
         "email": "scott.johnson@bms.com"
