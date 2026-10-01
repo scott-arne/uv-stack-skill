@@ -1,6 +1,6 @@
 # stack command reference
 
-Verified against uv-stack 0.6.0 (`stack --version` reports the installed
+Verified against uv-stack 0.7.2 (`stack --version` reports the installed
 version). `stack --help` and `<subcommand> --help` are authoritative when
 versions differ.
 
@@ -15,6 +15,7 @@ versions differ.
 - Editing config files (`stack edit`, editor precedence)
 - Comparing environments (`stack diff` sources, layers, verdicts)
 - Portable config roots (what travels, bring-up, `.gitignore`, variables)
+- Moving environments between machines (export, import, `sync remote`, `remotes.yaml`)
 - What `stack status` covers (and its blind spots)
 - Environment variables
 
@@ -29,7 +30,8 @@ Config root resolution: `--root` > `$UV_STACK_ROOT` > `$UV_ENV_ROOT` (legacy)
 
 A NAME given to `create`, `edit`, `show`, `status`, `upgrade`, or `sync env`
 is a file stem: one holding a path separator, a `.` or `..` segment, `:`, `@`,
-whitespace, or a leading `-` is refused. A hand-made directory with such a
+whitespace, a control character, or a leading `-`, or one that is not valid
+UTF-8, is refused. A hand-made directory with such a
 name still shows in `stack list env` and a bare `stack status`; rename it on
 disk to address it by name.
 
@@ -50,7 +52,7 @@ Grouped as in `stack --help`.
 
 | Command | Purpose | Key options |
 | --- | --- | --- |
-| `stack edit env\|profile\|bundle\|project [NAME]` | Open a config file in an editor, validate it when the editor exits, re-offer on error. `env` NAME defaults to `main`; `project` takes no NAME and edits `./pyproject.toml`. Never creates anything | `--file stack\|python\|micromamba\|channels\|local` (env only; default `stack`; a missing optional file is opened anyway), `--editor CMD` |
+| `stack edit env\|profile\|bundle\|project\|remotes [NAME]` | Open a config file in an editor, validate it when the editor exits, re-offer on error. `env` NAME defaults to `main`; `project` takes no NAME and edits `./pyproject.toml`; `remotes` takes no NAME and edits `<root>/remotes.yaml`. Never creates anything | `--file stack\|python\|micromamba\|channels\|local` (env only; default `stack`; a missing optional file is opened anyway), `--editor CMD` |
 
 ### Environments
 
@@ -71,6 +73,9 @@ Grouped as in `stack --help`.
 | `stack sync` | Create, build, and recompile every env the root declares. Creates missing envs, never prompts, preserves existing pins | `--dry-run`, `--stop-on-error`, `--strict`, `--upgrade` (force new pins) |
 | `stack sync env NAMES...` | The same, for the named envs only | same as `stack sync` |
 | `stack sync project TOKENS...` | Append TOKENS to the tracked project's recorded stack and re-resolve (a token already recorded makes it a plain refresh) | `--dry-run`, `--python`, `--no-sync`, `--strict` |
+| `stack sync remote [ITEMS]... DEST` | Export ITEMS (none = whole root) and import them on DEST over ssh; exit status is the remote's (see Moving environments between machines) | `--remote-stack CMD`, `--remote-root PATH`, `--overwrite`, `--no-build`, `--recreate`, `--dry-run`, `--strict` |
+| `stack export [ITEMS]...` | Write the items, everything they use, and each env's lock as one JSON document to stdout (warnings to stderr) | `-o FILE` |
+| `stack import FILE\|-` | Install a `stack export` document (`-` = stdin) and build each env it ships | `--overwrite`, `--dry-run`, `--no-build`, `--recreate`, `--strict` |
 
 ### Inspection
 
@@ -88,10 +93,13 @@ Grouped as in `stack --help`.
 | Command | Purpose | Key options |
 | --- | --- | --- |
 | `stack init` | Guided first-run setup (config tree, starter profile, first env) | `--yes` accepts defaults |
-| `stack doctor` | Detect problems, print `fix:` suggestions; never changes anything without `--fix`. Also checks portability: declared variables with no value, bad `${...}` references, missing editable checkouts, a `project-python.txt` that will not travel, a missing or stale managed `.gitignore` block, a name that is both a profile and a bundle | `--fix` (safe repairs only), `--json` |
+| `stack doctor` | Detect problems, print `fix:` suggestions; never changes anything without `--fix`. Also checks portability: declared variables with no value, bad `${...}` references, missing editable checkouts (a relative path is looked up from the current directory, as uv does; a local `file:` URL counts), a `project-python.txt` that will not travel, a missing or stale managed `.gitignore` block, a name that is both a profile and a bundle, an unreadable or invalid `remotes.yaml` | `--fix` (safe repairs only), `--json` |
 | `stack completion bash\|zsh\|fish` | Shell completion script | |
 | `stack config init` | Create missing config directories (bare primitive; `stack init` is the guided form) | |
 | `stack config portable` | Write the managed `.gitignore` block and `.gitkeep` placeholders in empty top-level dirs; print the git commands to run next. Never runs git | `--dry-run` (show block and next steps; write nothing) |
+| `stack config remote list` | Each host's `remotes.yaml` settings, with the default shown for an unset field | `--json` (stored values; null for unset) |
+| `stack config remote set HOST` | Merge the given fields into HOST's entry, adding it if new; a field not given keeps its value | `--stack CMD`, `--root PATH` |
+| `stack config remote remove HOST [stack\|root]...` | Remove HOST's entry, or only the named fields (an entry left empty stays and means the same as none) | |
 
 ## Stack tokens
 
@@ -121,6 +129,7 @@ command that renders.
 ├── .gitignore                # managed block written by `stack config portable`
 ├── project-python.txt        # optional: default --python for `create project`
 ├── editor.txt                # optional: editor command for `stack edit`; not committed
+├── remotes.yaml              # optional: per-host stack command and root for `stack sync remote`
 ├── profiles/<name>.yaml      # description, tags, includes: [pip requirements]
 ├── bundles/<name>.yaml       # includes: [stack tokens]; bundles can nest
 ├── .locks/                   # internal lock files — leave alone
@@ -252,9 +261,8 @@ place, never copied into this root), or a path to a
 - Verdict: `identical`, `identical-where-comparable` (pins matched, a bare
   lock hid the rest), or `different`. Exit 0 for all three; `--exit-code`
   exits 1 on `different`. An unreadable source exits 1 either way.
-- Compiled locks do not travel with a cloned root, so comparing against
-  another machine means copying its `envs/<name>/` directory (lock included)
-  here first.
+- Keep another machine's directory outside this root's `envs/`, where it
+  would become an environment of its own.
 
 ## Portable config roots
 
@@ -263,12 +271,13 @@ A config root can live in git and be cloned elsewhere.
 | Travels | Stays machine-local |
 | --- | --- |
 | `profiles/`, `bundles/`, `envs/*/stack.txt`, `python.txt`, `micromamba.txt`, `channels.txt` | `requirements.in`, `environment.yml`, `requirements.lock.txt` (generated) |
-| `variables.txt` (declared names) | `variables.local.txt` (this machine's values) |
+| `variables.txt` (declared names), `remotes.yaml` (the remote's paths belong to the remote) | `variables.local.txt` (this machine's values) |
 | `project-python.txt` when it holds a version, a uv form (`cpython@3.12`), or an env this root declares | `envs/*/requirements.local.in`, `editor.txt`, `.locks/` |
 
-- **Locks deliberately do not travel**: each machine compiles for its own
-  platform, so machines built from the same sources get compatible envs,
-  not identical pins. `stack diff` shows the difference.
+- **Locks deliberately do not travel** with a clone: each machine compiles for
+  its own platform, so machines built from the same sources get compatible
+  envs, not identical pins. `stack diff` shows the difference. An export does
+  carry locks, but only as seeds for the target's own compile.
 - **Bring-up on a new machine:** clone, `stack doctor` (names declared
   variables with no value here), fill `variables.local.txt`, `stack sync`.
 - **Making a root committable:** `stack config portable` writes a block
@@ -295,6 +304,104 @@ A config root can live in git and be cloned elsewhere.
 - The limit: `uv add` writes a local source's (editable or path) resolved
   absolute path into the project's own `[tool.uv.sources]`, so a tracked
   project that pulls in a local source is machine-bound in that table.
+
+## Moving environments between machines
+
+Without a shared git repo, `stack export` and `stack import` move definitions
+between roots, and `stack sync remote` does both over ssh.
+
+- **Items:** `env:NAME`, `profile:NAME`, `bundle:NAME`, `@NAME`, or a bare
+  NAME that names exactly one item; none = the whole root. An export carries
+  everything the items reach (profiles, bundles) and each env's lock.
+- **Export** writes JSON to stdout (warnings go to stderr, so a pipe stays
+  clean); `-o FILE` writes a file. It warns once per file that holds an
+  absolute path (`-e /src/foo`, `/wheels/x.whl`, `file://`): the path must
+  exist on the target. Use a `${NAME}` variable instead.
+- **Import outcomes:** each file is `new`, `identical`, `replace` (with
+  `--overwrite`), or `remove` (an env file the source no longer has, with
+  `--overwrite`). Without `--overwrite`, any differing file refuses the whole
+  import before anything is written: it prints a unified diff and the envs
+  that use the file, and exits 1. A `--dry-run` without `--overwrite` stops
+  at the same refusal, so preview a take-theirs import with
+  `--overwrite --dry-run`.
+- **Meaning changes are refused even with `--overwrite`.** A bare token must
+  resolve the same way before and after: a shipped stack that names `utils`
+  as a package is refused where this root has a `utils` profile, and
+  importing `profile:utils` is refused while a local stack names `utils` as a
+  package. Qualify the token (`pkg:utils`, `profile:utils`, `@utils`), in
+  place for this root's file, or on the source machine (then export again)
+  for a shipped one.
+- **Variables:** names the definitions reference but this root does not
+  declare are appended to `variables.txt` (names only, listed on a
+  `declare in variables.txt:` line). Set the values in `variables.local.txt`.
+- **Pre-flight** (skipped by `--no-build`), before anything is written:
+  refuses a variable with no value here, a missing editable checkout (a path,
+  relative ones resolved from the directory `stack` runs in, or a local
+  `file:` URL), an env already running a Python other than the one its
+  imported `python.txt` names (3.12 if none is shipped) unless `--recreate`,
+  and a `python.txt` that is not a plain version with `--recreate`.
+- **Build:** each imported env is created if absent, otherwise synced;
+  `--recreate` wipes and rebuilds it (not combinable with `--no-build`). The
+  shipped lock seeds the compile, so its pins are preferences that uv
+  re-resolves for this machine; a pin report follows
+  (`main: 41 pins kept, 1 changed, 0 dropped, 1 added`). Envs the document
+  does not ship are never rebuilt: a
+  `Not rebuilt, but using changed definitions: ...` line names those that use
+  a replaced profile or bundle, and `stack sync env NAME` rebuilds them.
+- **Re-running is safe.** After fixing a refusal or a dropped connection, run
+  the same import again: files already written report `identical`. A failed
+  build leaves the definitions written; rebuild it with the printed
+  `stack sync env NAME`, or after a failed `--recreate`, re-run the import
+  with `--recreate`.
+
+### `stack sync remote`
+
+`stack sync remote [ITEMS]... DEST` runs
+`ssh DEST <stack> [--root ROOT] import - [FLAGS]` with the export on stdin.
+Output streams back, and the exit status is the remote's. DEST is
+`user@host` or an ssh-config alias. `--overwrite`, `--no-build`,
+`--recreate`, `--dry-run`, and `--strict` are forwarded to the remote import.
+
+- **The remote's PATH:** ssh runs a non-interactive shell, which often lacks
+  `~/.local/bin` (`uv tool install`, the micromamba installer) or
+  `/opt/homebrew/bin`. The import also runs `uv` from PATH (micromamba from
+  `$MAMBA_EXE`, else PATH), so a full path to `stack` is not enough. Give the
+  stack command a PATH prefix instead: `PATH=$HOME/.local/bin:$PATH stack`,
+  single-quoted on the local command line so the remote shell expands it.
+  For a remote with uv but no uv-stack, use
+  `PATH=$HOME/.local/bin:$PATH uvx --from uv-stack stack`.
+- **Exit hints:** 255 means ssh failed or the connection dropped; a re-run is
+  safe, though one that finds the dropped import still running waits a few
+  seconds for its lock, then refuses. 127 means the remote shell did not find
+  the stack command (install it, or use the PATH prefix). 2 with
+  `No such command 'import'` means the remote's uv-stack is older than
+  `import`; run `uv tool upgrade uv-stack` there.
+- `stack sync env ...` commands the import prints refer to the remote. Run
+  them there with the same stack command and root the import used.
+- A relative editable path resolves against the remote user's home, where
+  the remote `stack` runs.
+- To pull instead of push: `ssh HOST stack export ITEMS | stack import -`.
+
+### `remotes.yaml`
+
+```yaml
+gpu-box:
+  stack: PATH=$HOME/.local/bin:$PATH stack
+  root: /data/python-envs
+```
+
+- Each entry allows only `stack` and `root`, both optional;
+  `--remote-stack` and `--remote-root` win over them. The key must match DEST
+  as typed: `stack sync remote user@gpu-box` does not use the `gpu-box` entry.
+- `stack` is inserted unquoted, so the remote shell expands `~` and `$HOME`
+  in it. `root` is passed quoted: only a leading `~` expands, and
+  `$HOME/envs` names a directory literally called `$HOME`.
+- Quote a host name YAML reads as something else (`"yes":`, `"1":`);
+  `config remote set` does this itself. A host listed twice is refused by
+  every command that reads the file.
+- `stack config remote set` and `remove` rewrite the whole file, so they
+  refuse one that holds comments. Edit a commented file with
+  `stack edit remotes`, which validates it when the editor exits.
 
 ## What `stack status` covers
 

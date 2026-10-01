@@ -20,7 +20,7 @@ skills/
   using-uv-stack/
     SKILL.md            # workflows, hard rules, common mistakes
     reference/
-      commands.md       # full command/flag/file/env-var reference (v0.6.0)
+      commands.md       # full command/flag/file/env-var reference (v0.7.2)
 ```
 
 ## Installation
