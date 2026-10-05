@@ -1,7 +1,7 @@
 {
   "name": "uv-stack",
   "description": "Skill for managing Python environments and project dependencies with the uv-stack `stack` CLI (micromamba + uv, profile/bundle-driven, fully locked).",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "author": {
     "name": "Scott Arne Johnson",
     "email": "scott.johnson@bms.com"
