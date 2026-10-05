@@ -28,8 +28,18 @@ stack [--root PATH] COMMAND ...
 Config root resolution: `--root` > `$UV_STACK_ROOT` > `$UV_ENV_ROOT` (legacy)
 > `~/.config/python-envs`.
 
+A root reached through a symbolic link to a directory that does not exist (a
+checkout or mount not there yet) is refused by every command that writes
+under it, naming the link and its target; a file at or above the root is
+refused as `Not a directory`. Restore the target, or create it with
+`stack config init`, which says so (`stack init` offers, `--yes` accepts);
+`stack doctor` reports it and `--fix` leaves the choice to you. Do not
+`mkdir` the target to get past the refusal: the link usually stands for a
+checkout that belongs there.
+
 A NAME given to `create`, `delete`, `edit`, `show`, `status`, `upgrade`, or
-`sync env` is a file stem: one holding a path separator, a `.` or `..` segment, `:`, `@`,
+`sync env`, and an ITEM name given to `export` or `sync remote`, is a file
+stem: an empty one, one holding a path separator, a `.` or `..` segment, `:`, `@`,
 whitespace, a control character, or a leading `-`, or one that is not valid
 UTF-8, is refused. A hand-made directory with such a
 name still shows in `stack list env` and a bare `stack status`; rename it on
@@ -43,13 +53,13 @@ Grouped as in `stack --help`.
 
 | Command | Purpose | Key options |
 | --- | --- | --- |
-| `stack create env NAME [TOKENS]...` | Scaffold (with TOKENS) and build a shared environment; without TOKENS, retarget an existing env's interpreter | `--python VER` (writes `python.txt`; without TOKENS it requires `--recreate`), `--recreate` (compile the lock first, then wipe and rebuild), `--strict` |
+| `stack create env NAME [TOKENS]...` | Scaffold (with TOKENS) and build a shared environment; without TOKENS, build or rebuild (`--recreate`) an existing env from its sources, or retarget its interpreter with `--python VER --recreate` | `--python VER` (writes `python.txt`; without TOKENS it requires `--recreate`), `--recreate` (compile the lock first, then wipe and rebuild), `--strict` |
 | `stack create project TOKENS...` | Create a uv project in the current directory from resolved tokens | `--python SPEC-or-env-name`, `--name`, `--no-sync`, `--force` (add to existing pyproject), `--no-track`, `--strict` |
 | `stack create profile NAME PKG...` | Write `profiles/NAME.yaml` | `--description`, `--tag` (repeatable) |
 | `stack create bundle NAME TOKEN...` | Write `bundles/NAME.yaml` | `--description`, `--tag`, `--strict` |
 | `stack delete env NAME` | Remove the micromamba environment if it is built, then `envs/NAME/`. Requires `envs/NAME/stack.txt`, so an env uv-stack does not manage is refused. A failed `micromamba remove` leaves the sources for a retry | `-y` |
 | `stack delete project` | Withdraw uv-stack from the project in the current directory: `uv remove` the `applied` (and leftover `pending`) packages still present, drop `[tool.uv-stack]`, then a plain `uv sync`. User-added dependencies, `pyproject.toml`, `uv.lock`, `.venv` stay | `--no-sync`, `-y` |
-| `stack delete profile NAME` | Delete `profiles/NAME.yaml`. Refused while an env's `stack.txt` or a bundle refers to NAME (bare or `profile:`), or a source cannot be read; the refusal lists each place | `--force` (delete anyway; warns per reference), `-y` |
+| `stack delete profile NAME` | Delete `profiles/NAME.yaml`. Refused while an env's `stack.txt` or a bundle refers to NAME (bare or `profile:`), or a source cannot be read; the refusal lists each place | `--force` (delete anyway, warning per reference: a bare token left behind then means the pip package of that name, a qualified one stops resolving), `-y` |
 | `stack delete bundle NAME` | Delete `bundles/NAME.yaml`. Refused on the same terms (`@NAME`, `bundle:NAME`, or bare) | `--force`, `-y` |
 
 Every `stack delete` asks before acting; `-y` answers yes, and a declined or
@@ -68,7 +78,7 @@ bundle is what needs editing.
 
 | Command | Purpose | Key options |
 | --- | --- | --- |
-| `stack upgrade [NAMES]...` | Render, compile, sync, check existing shared envs. No NAMES = all (prompts; `-y` skips). Never creates a missing env | `--all`, `--dry-run`, `--no-upgrade`, `--upgrade-package PKG` (repeatable), `--stop-on-error`, `--strict` |
+| `stack upgrade [NAMES]...` | Render, compile, sync, check existing shared envs. No NAMES = all (prompts; `-y` skips). Never creates a missing env | `--all`, `-y`, `--dry-run`, `--no-upgrade`, `--upgrade-package PKG` (repeatable), `--stop-on-error`, `--strict` |
 
 ### Projects
 
@@ -102,13 +112,13 @@ bundle is what needs editing.
 
 | Command | Purpose | Key options |
 | --- | --- | --- |
-| `stack init` | Guided first-run setup (config tree, starter profile, first env) | `--yes` accepts defaults |
-| `stack doctor` | Detect problems, print `fix:` suggestions; never changes anything without `--fix`. Also checks portability: declared variables with no value, bad `${...}` references, missing editable checkouts (a relative path is looked up from the current directory, as uv does; a local `file:` URL counts), a `project-python.txt` that will not travel, a missing or stale managed `.gitignore` block, a name that is both a profile and a bundle, an unreadable or invalid `remotes.yaml` | `--fix` (safe repairs only), `--json` |
+| `stack init` | Guided first-run setup (config tree, starter profile, first env) | `--yes` accepts defaults, including creating the missing target of a config-root link |
+| `stack doctor` | Detect problems, print `fix:` suggestions; never changes anything without `--fix`. Also checks portability: declared variables with no value, bad `${...}` references, missing editable checkouts (a relative path is looked up from the current directory, as uv does; a local `file:` URL counts), a `project-python.txt` that will not travel, a missing or stale managed `.gitignore` block in a root inside a git repository, a name that is both a profile and a bundle, an unreadable or invalid `remotes.yaml`, a setting written twice in one host's entry of it, and a config root reached through a symbolic link to a missing directory (an error `--fix` leaves to you) | `--fix` (safe repairs only), `--json` |
 | `stack completion bash\|zsh\|fish` | Shell completion script | |
-| `stack config init` | Create missing config directories (bare primitive; `stack init` is the guided form) | |
+| `stack config init` | Create missing config directories, including the missing target of a config-root link (bare primitive; `stack init` is the guided form) | |
 | `stack config portable` | Write the managed `.gitignore` block and `.gitkeep` placeholders in empty top-level dirs; print the git commands to run next. Never runs git | `--dry-run` (show block and next steps; write nothing) |
 | `stack config remote list` | Each host's `remotes.yaml` settings, with the default shown for an unset field | `--json` (stored values; null for unset) |
-| `stack config remote set HOST` | Merge the given fields into HOST's entry, adding it if new; a field not given keeps its value | `--stack CMD`, `--root PATH` |
+| `stack config remote set HOST` | Merge the given fields into HOST's entry, adding it if new; a field not given keeps its value | `--stack CMD`, `--root PATH` (at least one) |
 | `stack config remote remove HOST [stack\|root]...` | Remove HOST's entry, or only the named fields (an entry left empty stays and means the same as none) | |
 
 ## Stack tokens
@@ -122,11 +132,15 @@ bundle is what needs editing.
 | `numpy>=2`, `-e ~/src/mytool`, archive paths | Literal pip requirement, passed through |
 
 Near-miss bare tokens trigger a "did you mean" warning; `--strict` (on
-`upgrade`, `sync`, `create env/project/bundle`, `resolve`, `refresh`) turns
+`upgrade`, `sync`, `create env/project/bundle`, `resolve`, `refresh`, `import`)
+turns
 any unqualified fallthrough into an error.
 
 Entries in profiles, bundles, and `stack.txt` may reference `${NAME}` for a
-variable the root declares (see Portable config roots). An entry spanning
+variable the root declares (see Portable config roots). A reference may stand
+only in a path or an option value (`-e ${DEV}/pkg`, `--index-url
+${HOST}/simple`, `${DEV}/pkg`); it may not name a distribution, and it may not
+sit inside a `-r`/`-c` include. An entry spanning
 more than one line or ending in a trailing backslash is refused by every
 command that renders.
 
@@ -168,9 +182,9 @@ command that renders.
   preserve existing pins by default (`--upgrade` floats them). Upgrade is
   for envs that exist; sync is for "make this root real on this machine".
 - Conda-layer sources (`micromamba.txt`, `channels.txt`, `python.txt`) render
-  into `environment.yml`, but a plain `stack upgrade` of an existing env runs
-  micromamba only if the env is missing — the live conda layer is applied at
-  creation or `--recreate` only. After editing them, rebuild with
+  into `environment.yml`, but a plain `stack upgrade` never touches the conda
+  layer (a missing env is an error) — it is applied at creation (`create env`,
+  `sync`, `import`) or `--recreate` only. After editing them, rebuild with
   `stack create env NAME --recreate`.
 - Changing an env's interpreter: `stack create env NAME --python 3.14
   --recreate`. `--recreate` requires `python.txt` to hold a plain dotted
@@ -253,7 +267,9 @@ command that renders.
   re-offer (error, exit 1); an editor exiting non-zero (`:cq`) aborts
   without validating.
 - On success it names how to apply: `stack upgrade NAME` for an env,
-  `stack refresh` for a project, next upgrade/refresh for a profile or bundle.
+  `stack refresh` for a tracked project (an untracked one gets a warning and
+  no hint), next upgrade/refresh for a profile or bundle, and the next
+  `stack sync remote` for `remotes`.
 - Editor: `--editor` > `$UV_STACK_EDITOR` > `<config-root>/editor.txt` >
   `$VISUAL` > `$EDITOR`; empty values are skipped; none set = refuses. The
   value is a command line (`code -w`, `emacsclient -nw`).
@@ -343,7 +359,8 @@ between roots, and `stack sync remote` does both over ssh.
   import before anything is written: it prints a unified diff and the envs
   that use the file, and exits 1. A `--dry-run` without `--overwrite` stops
   at the same refusal, so preview a take-theirs import with
-  `--overwrite --dry-run`.
+  `--overwrite --dry-run`. A dry run also refuses a config root with a file or
+  a broken symbolic link above it, as the real import does.
 - **Meaning changes are refused even with `--overwrite`.** A bare token must
   resolve the same way before and after: a shipped stack that names `utils`
   as a package is refused where this root has a `utils` profile, and
@@ -367,7 +384,10 @@ between roots, and `stack sync remote` does both over ssh.
   (`main: 41 pins kept, 1 changed, 0 dropped, 1 added`). Envs the document
   does not ship are never rebuilt: a
   `Not rebuilt, but using changed definitions: ...` line names those that use
-  a replaced profile or bundle, and `stack sync env NAME` rebuilds them.
+  a replaced profile or bundle, or an unchanged bundle whose bare token a
+  shipped profile now captures (it can print without `--overwrite`; on a
+  case-folding filesystem a shipped case variant counts as a replacement),
+  and `stack sync env NAME` rebuilds them.
 - **Re-running is safe.** After fixing a refusal or a dropped connection, run
   the same import again: files already written report `identical`. A failed
   build leaves the definitions written; rebuild it with the printed
@@ -419,6 +439,11 @@ gpu-box:
 - Quote a host name YAML reads as something else (`"yes":`, `"1":`);
   `config remote set` does this itself. A host listed twice is refused by
   every command that reads the file.
+- A setting written twice in one host's entry (two `root:` lines) keeps only
+  the last under YAML; `config remote list`, `set` and `remove`, `sync remote`
+  and `edit remotes` warn on stderr, naming both lines and the one used, and
+  `doctor` reports it. `set` and `remove` keep the used value when they
+  rewrite the file. A `<<` merge key is not counted.
 - `stack config remote set` and `remove` rewrite the whole file, so they
   refuse one that holds comments. Edit a commented file with
   `stack edit remotes`, which validates it when the editor exits.
@@ -460,7 +485,7 @@ with `stack create env NAME --recreate`.
 | --- | --- |
 | `UV_STACK_ROOT` | Config root (overridden by `--root`) |
 | `UV_ENV_ROOT` | Legacy spelling; used only when `UV_STACK_ROOT` unset/empty |
-| `UV_STACK_PROJECT_PYTHON` | Default interpreter spec for `create project` |
+| `UV_STACK_PROJECT_PYTHON` | Default interpreter spec for `create project`, and for `refresh`/`sync project` when the table records no `python` |
 | `UV_STACK_EDITOR` | Editor for `stack edit`; beats `editor.txt`, `$VISUAL`, `$EDITOR` |
 | `VISUAL`, `EDITOR` | Fallback editors for `stack edit`, in that order, below `editor.txt` |
 | any name in `variables.txt` | This machine's value for `${NAME}`; beats `variables.local.txt` |

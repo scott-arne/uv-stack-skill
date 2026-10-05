@@ -21,6 +21,9 @@ skills/
     SKILL.md            # workflows, hard rules, common mistakes
     reference/
       commands.md       # full command/flag/file/env-var reference (v0.8.0)
+README.md               # this file
+LICENSE                 # MIT
+vrzn.toml               # where the version lives, for `vrzn bump`
 ```
 
 ## Installation
@@ -36,7 +39,8 @@ From a local checkout, replace the repository slug with the checkout path.
 Verify with `/plugin` — the skill loads as `uv-stack:using-uv-stack`.
 
 Prerequisites on the target machine: `uv`, `micromamba` (after
-`micromamba shell init`), and `uv tool install uv-stack`.
+`micromamba shell init`), and uv-stack 0.8.0 or newer (`uv tool install
+uv-stack`).
 
 ## Machine-local configuration
 
@@ -47,8 +51,9 @@ single well-known file:
 <config-root>/AGENTS.md
 ```
 
-where the config root is resolved the same way `stack` resolves it:
-`$UV_STACK_ROOT`, else legacy `$UV_ENV_ROOT`, else `~/.config/python-envs`.
+where the config root is resolved the same way `stack` resolves it: `--root`
+if given, else `$UV_STACK_ROOT`, else legacy `$UV_ENV_ROOT`, else
+`~/.config/python-envs`.
 
 If that file exists, the skill directs the agent to read it before acting and
 to treat it as overriding the skill's generic defaults. Use it for policies
@@ -56,3 +61,7 @@ such as the machine's default shared environment, environments that must not
 be modified, naming conventions, or local network quirks. Because it sits in
 the config root, it travels with the environment definitions and is visible
 to any agent runtime that honors the convention, not just Claude Code.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
