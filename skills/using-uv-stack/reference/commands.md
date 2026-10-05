@@ -1,6 +1,6 @@
 # stack command reference
 
-Verified against uv-stack 0.7.2 (`stack --version` reports the installed
+Verified against uv-stack 0.8.0 (`stack --version` reports the installed
 version). `stack --help` and `<subcommand> --help` are authoritative when
 versions differ.
 
@@ -28,8 +28,8 @@ stack [--root PATH] COMMAND ...
 Config root resolution: `--root` > `$UV_STACK_ROOT` > `$UV_ENV_ROOT` (legacy)
 > `~/.config/python-envs`.
 
-A NAME given to `create`, `edit`, `show`, `status`, `upgrade`, or `sync env`
-is a file stem: one holding a path separator, a `.` or `..` segment, `:`, `@`,
+A NAME given to `create`, `delete`, `edit`, `show`, `status`, `upgrade`, or
+`sync env` is a file stem: one holding a path separator, a `.` or `..` segment, `:`, `@`,
 whitespace, a control character, or a leading `-`, or one that is not valid
 UTF-8, is refused. A hand-made directory with such a
 name still shows in `stack list env` and a bare `stack status`; rename it on
@@ -39,7 +39,7 @@ disk to address it by name.
 
 Grouped as in `stack --help`.
 
-### Create
+### Create and delete
 
 | Command | Purpose | Key options |
 | --- | --- | --- |
@@ -47,6 +47,16 @@ Grouped as in `stack --help`.
 | `stack create project TOKENS...` | Create a uv project in the current directory from resolved tokens | `--python SPEC-or-env-name`, `--name`, `--no-sync`, `--force` (add to existing pyproject), `--no-track`, `--strict` |
 | `stack create profile NAME PKG...` | Write `profiles/NAME.yaml` | `--description`, `--tag` (repeatable) |
 | `stack create bundle NAME TOKEN...` | Write `bundles/NAME.yaml` | `--description`, `--tag`, `--strict` |
+| `stack delete env NAME` | Remove the micromamba environment if it is built, then `envs/NAME/`. Requires `envs/NAME/stack.txt`, so an env uv-stack does not manage is refused. A failed `micromamba remove` leaves the sources for a retry | `-y` |
+| `stack delete project` | Withdraw uv-stack from the project in the current directory: `uv remove` the `applied` (and leftover `pending`) packages still present, drop `[tool.uv-stack]`, then a plain `uv sync`. User-added dependencies, `pyproject.toml`, `uv.lock`, `.venv` stay | `--no-sync`, `-y` |
+| `stack delete profile NAME` | Delete `profiles/NAME.yaml`. Refused while an env's `stack.txt` or a bundle refers to NAME (bare or `profile:`), or a source cannot be read; the refusal lists each place | `--force` (delete anyway; warns per reference), `-y` |
+| `stack delete bundle NAME` | Delete `bundles/NAME.yaml`. Refused on the same terms (`@NAME`, `bundle:NAME`, or bare) | `--force`, `-y` |
+
+Every `stack delete` asks before acting; `-y` answers yes, and a declined or
+unanswered prompt (no TTY) exits 1 with nothing touched. There is no
+`--dry-run`. Only *direct* references block a profile or bundle delete: an
+env that reaches a profile through a bundle is not listed, because the
+bundle is what needs editing.
 
 ### Edit
 
@@ -170,6 +180,9 @@ command that renders.
   The candidate lock is compiled *before* `micromamba remove` runs, so an
   unsatisfiable resolve leaves the old environment intact, and the lock is
   published only after the rebuild succeeds.
+- Removing an env: `stack delete env NAME` runs `micromamba remove -n NAME
+  --all` (when the env is built) and then deletes `envs/NAME/`, under the
+  same per-name lock `create env` takes.
 - A non-recreate `stack upgrade` refuses outright when the env's running
   interpreter no longer satisfies `python.txt`, rather than syncing the pip
   layer onto the wrong interpreter. The error names both remedies: edit
@@ -223,6 +236,13 @@ command that renders.
   auto-resume.
 - Day to day a tracked project is still a normal uv project: `uv add`,
   `uv sync`, `uv run` all work.
+- Leaving uv-stack: `stack delete project` removes exactly what `stack
+  refresh` would remove if the stack were emptied (the `applied` ledger plus
+  any leftover `pending`, by name, only those still present; direct
+  references are skipped with the same `Not auto-removed` notice), drops
+  the table, and runs a plain `uv sync`. The project is then a plain uv
+  project with only the dependencies the user added. Re-adopt it later with
+  `stack create project --force TOKENS...`.
 
 ## Editing config files
 
